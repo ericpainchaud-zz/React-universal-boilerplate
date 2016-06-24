@@ -1,7 +1,7 @@
 var path = require('path')
 var webpack = require('webpack')
 
-module.exports = {
+var config = {
   devtool: 'inline-source-map',
   entry: [
     'webpack-hot-middleware/client',
@@ -30,3 +30,16 @@ module.exports = {
     ]
   }
 }
+
+if (process.env.NODE_ENV === 'production') {
+  config.plugins.push(
+    new webpack.optimize.UglifyJsPlugin({
+      compressor: {
+        screw_ie8: true,
+        warnings: false
+      }
+    })
+  );
+}
+
+module.exports = config;

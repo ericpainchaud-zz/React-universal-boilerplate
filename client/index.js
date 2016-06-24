@@ -2,15 +2,15 @@ import 'babel-polyfill';
 import React from 'react';
 import ReactDOM from 'react-dom';
 import { Provider } from 'react-redux';
+import { Router, browserHistory } from 'react-router';
 import configureStore from '../common/store/configureStore';
-import App from '../common/containers/App';
+import getRoutes from '../common/routes';
 
-const preloadedState = window.__PRELOADED_STATE__;
-const store = configureStore(preloadedState);
+const store = configureStore(window.__PRELOADED_STATE__);
 
 ReactDOM.render(
   <Provider store={store}>
-    <App/>
+    <Router history={browserHistory} routes={getRoutes(store)}/>
   </Provider>,
   document.getElementById('root')
 )

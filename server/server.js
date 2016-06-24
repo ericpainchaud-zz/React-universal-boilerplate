@@ -1,37 +1,106 @@
 /* eslint-disable no-console, no-use-before-define */
 
-import path from 'path'
+import path from 'path';
 import express from 'express';
-import qs from 'qs'
+import qs from 'qs';
 
-import webpack from 'webpack'
-import webpackDevMiddleware from 'webpack-dev-middleware'
-import webpackHotMiddleware from 'webpack-hot-middleware'
-import webpackConfig from '../webpack.config'
+import logger from 'morgan';
+import favicon from 'serve-favicon';
+import compression from 'compression';
+import httpProxy from 'http-proxy';
+import cookieParser from 'cookie-parser';
+import bodyParser from 'body-parser';
+import expressValidator from 'express-validator';
 
-import React from 'react'
-import { renderToString } from 'react-dom/server'
-import { Provider } from 'react-redux'
+import webpack from 'webpack';
+import webpackDevMiddleware from 'webpack-dev-middleware';
+import webpackHotMiddleware from 'webpack-hot-middleware';
+import webpackConfig from '../webpack.config';
 
-import configureStore from '../common/store/configureStore'
-import App from '../common/containers/App'
-import { fetchCounter } from '../common/api/counter'
+import { match, RouterContext } from 'react-router'
+import routes from '../common/routes';
+
+import React from 'react';
+import { renderToString } from 'react-dom/server';
+import { Provider } from 'react-redux';
+import nunjucks from 'nunjucks';
+
+import configureStore from '../common/store/configureStore';
+import { fetchCounter } from '../common/api/counter';
 
 const DEBUG = process.env.NODE_ENV !== 'production';
-const PORT = 3000
-const server = express()
+const PORT = 3000;
+const server = express();
+
+/**
+const proxy = httpProxy.createProxyServer({
+  target: targetUrl,
+  ws: true
+});
+
+**/
+// view engine setup
+nunjucks.configure('server/views', {
+  autoescape: true,
+  express: server
+});
+server.set('view engine', 'html');
+server.set('port', PORT);
+server.use(compression())
+server.use(favicon(path.join(__dirname, '..', 'static', 'favicon.ico')))
+server.use(logger('dev'));
+server.use(bodyParser.json());
+server.use(bodyParser.urlencoded({ extended: false }));
+server.use(expressValidator());
+server.use(cookieParser());
+
+/**
+
+server.use('/css', postcss({
+  src: function(req) {
+    return path.join(__dirname, 'public', 'css', req.path);
+  },
+  plugins: [atImport(), cssnext()]
+}));
+
+**/
+
+/**
+// Proxy to API server
+server.use('/api', (req, res) => {
+  proxy.web(req, res, {target: targetUrl})
+})
+**/
+
+/**
+// added the error handling to avoid https://github.com/nodejitsu/node-http-proxy/issues/527
+proxy.on('error', (error, req, res) => {
+  let json
+  if (error.code !== 'ECONNRESET') {
+    console.error('proxy error', error)
+  }
+  if (!res.headersSent) {
+    if (typeof res.writeHead === 'function') res.writeHead(500, {'content-type': 'application/json'});
+  }
+
+  json = {error: 'proxy_error', reason: error.message}
+  res.end(JSON.stringify(json))
+})
+**/
 
 if (DEBUG) {
   // Use this middleware to set up hot module reloading via webpack.
   const compiler = webpack(webpackConfig)
   server.use(webpackDevMiddleware(compiler, {
-    historyApiFallback: true,
-    hot: true,
-    quiet: true,
     noInfo: true,
     publicPath: webpackConfig.output.publicPath
   }))
   server.use(webpackHotMiddleware(compiler))
+} else {
+  server.use(function(err, req, res, next) {
+    console.error(err.stack);
+    res.sendStatus(err.status || 500);
+  });
 }
 
 // This is fired every time the server side receives a request
@@ -45,42 +114,26 @@ function handleRender(req, res) {
     const counter = parseInt(params.counter, 10) || apiResult || 0
 
     // Compile an initial state
-    const preloadedState = { counter }
+    const initialState = { counter };
 
-    // Create a new Redux store instance
-    const store = configureStore(preloadedState)
+    var store = configureStore(initialState);
 
-    // Render the component to a string
-    const html = renderToString(
-      <Provider store={store}>
-        <App />
-      </Provider>
-    )
-
-    // Grab the initial state from our Redux store
-    const finalState = store.getState()
-
-    // Send the rendered page back to the client
-    res.send(renderFullPage(html, finalState))
+    match({ routes: routes(store), location: req.url }, function(err, redirectLocation, renderProps) {
+      if (err) {
+        res.status(500).send(err.message);
+      } else if (redirectLocation) {
+        res.status(302).redirect(redirectLocation.pathname + redirectLocation.search);
+      } else if (renderProps) {
+        var html = renderToString(React.createElement(Provider, { store: store },
+          React.createElement(RouterContext, renderProps)
+        ));
+        var page = nunjucks.render('layout.html', { html: html, initialState: JSON.stringify(store.getState()) });
+        res.status(200).send(page);
+      } else {
+        res.sendStatus(404);
+      }
+    });
   })
-}
-
-function renderFullPage(html, preloadedState) {
-  return `
-    <!doctype html>
-    <html>
-      <head>
-        <title>Boilerplate for universal React applications.</title>
-      </head>
-      <body>
-        <div id="root">${html}</div>
-        <script>
-          window.__PRELOADED_STATE__ = ${JSON.stringify(preloadedState)}
-        </script>
-        <script src="bundle.js"></script>
-      </body>
-    </html>
-    `
 }
 
 server.use(express.static('static'));
@@ -92,3 +145,5 @@ server.listen(PORT, (error) => {
     console.info(`==> 🌎  Listening on port ${PORT}. Open up http://localhost:${PORT}/ in your browser.`)
   }
 })
+
+module.exports = server;
